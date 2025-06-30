@@ -497,7 +497,7 @@ async fn sign_message(req: web::Json<SignMessageRequest>) -> HttpResponse {
             bytes
         }
         Err(e) => {
-            warn!("❌ Failed to decode secret key from base58: {}", e);
+            warn!("❌ Failed to decode secret key from base58: {:?}", e);
             return HttpResponse::BadRequest().json(Response::<()>::error(
                 "Invalid secret key format (must be base58)".to_string(),
             ));
