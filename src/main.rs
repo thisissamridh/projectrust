@@ -1,4 +1,4 @@
-use actix_web::{App, HttpResponse, HttpServer, middleware::Logger, web};
+use actix_web::{App, HttpResponse, HttpServer, web};
 use base58::{FromBase58, ToBase58};
 use base64;
 use serde::{Deserialize, Serialize};
@@ -146,22 +146,10 @@ struct SendTokenResponse {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
-
-    println!("🚀 Starting Solana API server on http://0.0.0.0:8080");
-    println!("📋 Available endpoints:");
-    println!("  GET  /health           - Health check");
-    println!("  POST /keypair          - Generate new keypair");
-    println!("  POST /token/create     - Create SPL token mint instruction");
-    println!("  POST /token/mint       - Create mint tokens instruction");
-    println!("  POST /message/sign     - Sign message with private key");
-    println!("  POST /message/verify   - Verify message signature");
-    println!("  POST /send/sol         - Create SOL transfer instruction");
-    println!("  POST /send/token       - Create SPL token transfer instruction");
+    println!("Starting Solana server on port 8080");
 
     HttpServer::new(|| {
         App::new()
-            .wrap(Logger::default())
             .route("/health", web::get().to(health))
             .route("/keypair", web::post().to(make_keypair))
             .route("/token/create", web::post().to(make_token))
@@ -179,9 +167,7 @@ async fn main() -> std::io::Result<()> {
 /// Health check endpoint
 async fn health() -> HttpResponse {
     HttpResponse::Ok().json(serde_json::json!({
-        "status": "ok",
-        "service": "solana-api",
-        "timestamp": chrono::Utc::now().to_rfc3339()
+        "status": "ok"
     }))
 }
 
@@ -198,11 +184,10 @@ async fn make_keypair() -> HttpResponse {
 
 /// Create SPL token mint initialization instruction
 async fn make_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
-    // Validate required fields
-    if req.mint_authority.trim().is_empty() || req.mint.trim().is_empty() {
-        return HttpResponse::BadRequest().json(Response::<()>::error(
-            "Missing required fields: mintAuthority and mint are required".to_string(),
-        ));
+    // Check for missing/empty fields
+    if req.mint_authority.is_empty() || req.mint.is_empty() {
+        return HttpResponse::BadRequest()
+            .json(Response::<()>::error("Missing required fields".to_string()));
     }
 
     // Validate decimals (SPL Token standard allows 0-9 decimals)
@@ -216,9 +201,8 @@ async fn make_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
     let mint_authority = match Pubkey::from_str(&req.mint_authority) {
         Ok(pk) => pk,
         Err(_) => {
-            return HttpResponse::BadRequest().json(Response::<()>::error(
-                "Invalid mint authority public key".to_string(),
-            ));
+            return HttpResponse::BadRequest()
+                .json(Response::<()>::error("Invalid mint authority".to_string()));
         }
     };
 
@@ -232,21 +216,14 @@ async fn make_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
     };
 
     // Create initialize mint instruction
-    let instruction = match instruction::initialize_mint(
+    let instruction = instruction::initialize_mint(
         &spl_token::id(),
         &mint_address,
         &mint_authority,
         None, // No freeze authority
         req.decimals,
-    ) {
-        Ok(ix) => ix,
-        Err(e) => {
-            return HttpResponse::InternalServerError().json(Response::<()>::error(format!(
-                "Failed to create instruction: {}",
-                e
-            )));
-        }
-    };
+    )
+    .unwrap();
 
     let accounts: Vec<Account> = instruction
         .accounts
@@ -269,14 +246,10 @@ async fn make_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
 
 /// Create mint tokens instruction
 async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
-    // Validate required fields
-    if req.mint.trim().is_empty()
-        || req.destination.trim().is_empty()
-        || req.authority.trim().is_empty()
-    {
-        return HttpResponse::BadRequest().json(Response::<()>::error(
-            "Missing required fields: mint, destination, and authority are required".to_string(),
-        ));
+    // Check for empty fields
+    if req.mint.is_empty() || req.destination.is_empty() || req.authority.is_empty() {
+        return HttpResponse::BadRequest()
+            .json(Response::<()>::error("Missing required fields".to_string()));
     }
 
     // Validate amount
@@ -314,22 +287,15 @@ async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
     };
 
     // Create mint to instruction
-    let instruction = match instruction::mint_to(
+    let instruction = instruction::mint_to(
         &spl_token::id(),
         &mint_address,
         &destination_address,
         &authority_address,
         &[], // No additional signers
         req.amount,
-    ) {
-        Ok(ix) => ix,
-        Err(e) => {
-            return HttpResponse::InternalServerError().json(Response::<()>::error(format!(
-                "Failed to create instruction: {}",
-                e
-            )));
-        }
-    };
+    )
+    .unwrap();
 
     let accounts: Vec<Account> = instruction
         .accounts
@@ -352,31 +318,31 @@ async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
 
 /// Sign a message with a private key
 async fn sign_message(req: web::Json<SignMessageRequest>) -> HttpResponse {
-    // Validate required fields
+    // Check for missing fields first
     if req.message.is_empty() {
-        return HttpResponse::BadRequest()
-            .json(Response::<()>::error("Message cannot be empty".to_string()));
+        return HttpResponse::Ok()
+            .json(Response::<()>::error("Missing required fields".to_string()));
     }
 
-    if req.secret.trim().is_empty() {
-        return HttpResponse::BadRequest()
-            .json(Response::<()>::error("Secret key is required".to_string()));
+    if req.secret.is_empty() {
+        return HttpResponse::Ok()
+            .json(Response::<()>::error("Missing required fields".to_string()));
     }
 
     // Decode secret key from base58
     let secret_bytes = match req.secret.from_base58() {
         Ok(bytes) => bytes,
         Err(_) => {
-            return HttpResponse::BadRequest().json(Response::<()>::error(
-                "Invalid secret key format (must be base58)".to_string(),
+            return HttpResponse::Ok().json(Response::<()>::error(
+                "Invalid secret key format".to_string(),
             ));
         }
     };
 
     // Validate secret key length
     if secret_bytes.len() != 64 {
-        return HttpResponse::BadRequest().json(Response::<()>::error(
-            "Invalid secret key length (must be 64 bytes)".to_string(),
+        return HttpResponse::Ok().json(Response::<()>::error(
+            "Invalid secret key length".to_string(),
         ));
     }
 
@@ -384,7 +350,7 @@ async fn sign_message(req: web::Json<SignMessageRequest>) -> HttpResponse {
     let keypair = match Keypair::from_bytes(&secret_bytes) {
         Ok(kp) => kp,
         Err(_) => {
-            return HttpResponse::BadRequest()
+            return HttpResponse::Ok()
                 .json(Response::<()>::error("Invalid secret key".to_string()));
         }
     };
@@ -404,11 +370,10 @@ async fn sign_message(req: web::Json<SignMessageRequest>) -> HttpResponse {
 
 /// Verify a message signature
 async fn verify_message(req: web::Json<VerifyMessageRequest>) -> HttpResponse {
-    // Validate required fields
-    if req.message.is_empty() || req.signature.trim().is_empty() || req.pubkey.trim().is_empty() {
-        return HttpResponse::BadRequest().json(Response::<()>::error(
-            "Missing required fields: message, signature, and pubkey are required".to_string(),
-        ));
+    // Check for missing fields
+    if req.message.is_empty() || req.signature.is_empty() || req.pubkey.is_empty() {
+        return HttpResponse::BadRequest()
+            .json(Response::<()>::error("Missing required fields".to_string()));
     }
 
     // Parse public key
@@ -425,7 +390,7 @@ async fn verify_message(req: web::Json<VerifyMessageRequest>) -> HttpResponse {
         Ok(bytes) => bytes,
         Err(_) => {
             return HttpResponse::BadRequest().json(Response::<()>::error(
-                "Invalid signature format (must be base64)".to_string(),
+                "Invalid signature format".to_string(),
             ));
         }
     };
@@ -433,7 +398,7 @@ async fn verify_message(req: web::Json<VerifyMessageRequest>) -> HttpResponse {
     // Validate signature length
     if signature_bytes.len() != 64 {
         return HttpResponse::BadRequest().json(Response::<()>::error(
-            "Invalid signature length (must be 64 bytes)".to_string(),
+            "Invalid signature length".to_string(),
         ));
     }
 
@@ -460,11 +425,10 @@ async fn verify_message(req: web::Json<VerifyMessageRequest>) -> HttpResponse {
 
 /// Create SOL transfer instruction
 async fn send_sol(req: web::Json<SendSolRequest>) -> HttpResponse {
-    // Validate required fields
-    if req.from.trim().is_empty() || req.to.trim().is_empty() {
-        return HttpResponse::BadRequest().json(Response::<()>::error(
-            "Missing required fields: from and to addresses are required".to_string(),
-        ));
+    // Check for empty strings
+    if req.from.is_empty() || req.to.is_empty() {
+        return HttpResponse::BadRequest()
+            .json(Response::<()>::error("Missing required fields".to_string()));
     }
 
     // Validate amount
@@ -494,7 +458,7 @@ async fn send_sol(req: web::Json<SendSolRequest>) -> HttpResponse {
     // Prevent self-transfer
     if from_address == to_address {
         return HttpResponse::BadRequest().json(Response::<()>::error(
-            "Cannot transfer to the same address".to_string(),
+            "Cannot transfer to same address".to_string(),
         ));
     }
 
@@ -519,14 +483,10 @@ async fn send_sol(req: web::Json<SendSolRequest>) -> HttpResponse {
 
 /// Create SPL token transfer instruction
 async fn send_token(req: web::Json<SendTokenRequest>) -> HttpResponse {
-    // Validate required fields
-    if req.destination.trim().is_empty()
-        || req.mint.trim().is_empty()
-        || req.owner.trim().is_empty()
-    {
-        return HttpResponse::BadRequest().json(Response::<()>::error(
-            "Missing required fields: destination, mint, and owner are required".to_string(),
-        ));
+    // Check for missing/empty fields
+    if req.destination.is_empty() || req.mint.is_empty() || req.owner.is_empty() {
+        return HttpResponse::BadRequest()
+            .json(Response::<()>::error("Missing required fields".to_string()));
     }
 
     // Validate amount
@@ -565,7 +525,7 @@ async fn send_token(req: web::Json<SendTokenRequest>) -> HttpResponse {
     // Prevent self-transfer
     if owner_address == destination_address {
         return HttpResponse::BadRequest().json(Response::<()>::error(
-            "Cannot transfer to the same address".to_string(),
+            "Cannot transfer to same address".to_string(),
         ));
     }
 
@@ -574,22 +534,15 @@ async fn send_token(req: web::Json<SendTokenRequest>) -> HttpResponse {
     let destination_ata = get_associated_token_address(&destination_address, &mint_address);
 
     // Create transfer instruction
-    let instruction = match instruction::transfer(
+    let instruction = instruction::transfer(
         &spl_token::id(),
         &source_ata,
         &destination_ata,
         &owner_address,
         &[], // No additional signers
         req.amount,
-    ) {
-        Ok(ix) => ix,
-        Err(e) => {
-            return HttpResponse::InternalServerError().json(Response::<()>::error(format!(
-                "Failed to create instruction: {}",
-                e
-            )));
-        }
-    };
+    )
+    .unwrap();
 
     // Map accounts with signer information
     let accounts: Vec<TokenAccount> = instruction
