@@ -49,7 +49,7 @@ struct KeypairData {
 // Token create endpoint structures
 #[derive(Deserialize)]
 struct TokenCreateRequest {
-    #[serde(rename = "mintAuthority")]
+    #[serde(rename = "mintAuthority", alias = "mint_authority")]
     mint_authority: String,
     mint: String,
     decimals: u8,
@@ -228,7 +228,7 @@ async fn make_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
         req.mint_authority, req.mint, req.decimals
     );
 
-    // Validate required fields
+    // Validate required fields - return 400 for any error
     if req.mint_authority.trim().is_empty() || req.mint.trim().is_empty() {
         warn!("❌ Missing required fields in token create request");
         return HttpResponse::BadRequest().json(Response::<()>::error(
@@ -290,7 +290,7 @@ async fn make_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
         }
         Err(e) => {
             error!("❌ Failed to create initialize_mint instruction: {}", e);
-            return HttpResponse::InternalServerError().json(Response::<()>::error(format!(
+            return HttpResponse::BadRequest().json(Response::<()>::error(format!(
                 "Failed to create instruction: {}",
                 e
             )));
@@ -341,7 +341,7 @@ async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
         req.mint, req.destination, req.authority, req.amount
     );
 
-    // Validate required fields
+    // Validate required fields - return 400 for any error
     if req.mint.trim().is_empty()
         || req.destination.trim().is_empty()
         || req.authority.trim().is_empty()
@@ -422,7 +422,7 @@ async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
         }
         Err(e) => {
             error!("❌ Failed to create mint_to instruction: {}", e);
-            return HttpResponse::InternalServerError().json(Response::<()>::error(format!(
+            return HttpResponse::BadRequest().json(Response::<()>::error(format!(
                 "Failed to create instruction: {}",
                 e
             )));
@@ -474,7 +474,7 @@ async fn sign_message(req: web::Json<SignMessageRequest>) -> HttpResponse {
         !req.secret.trim().is_empty()
     );
 
-    // Validate required fields
+    // Validate required fields - return 400 for any error
     if req.message.is_empty() {
         warn!("❌ Empty message provided");
         return HttpResponse::BadRequest()
@@ -564,7 +564,7 @@ async fn verify_message(req: web::Json<VerifyMessageRequest>) -> HttpResponse {
         req.pubkey
     );
 
-    // Validate required fields
+    // Validate required fields - return 400 for any error
     if req.message.is_empty() || req.signature.trim().is_empty() || req.pubkey.trim().is_empty() {
         warn!("❌ Missing required fields in verify message request");
         return HttpResponse::BadRequest().json(Response::<()>::error(
@@ -767,7 +767,7 @@ async fn send_token(req: web::Json<SendTokenRequest>) -> HttpResponse {
         req.destination, req.mint, req.owner, req.amount
     );
 
-    // Validate required fields
+    // Validate required fields - return 400 for any error
     if req.destination.trim().is_empty()
         || req.mint.trim().is_empty()
         || req.owner.trim().is_empty()
@@ -862,7 +862,7 @@ async fn send_token(req: web::Json<SendTokenRequest>) -> HttpResponse {
         }
         Err(e) => {
             error!("❌ Failed to create token transfer instruction: {}", e);
-            return HttpResponse::InternalServerError().json(Response::<()>::error(format!(
+            return HttpResponse::BadRequest().json(Response::<()>::error(format!(
                 "Failed to create instruction: {}",
                 e
             )));
