@@ -1,17 +1,42 @@
 use actix_web::{App, HttpResponse, HttpServer, web};
 use base58::{FromBase58, ToBase58};
 use base64::{self, Engine as _, engine::general_purpose};
+use borsh::{BorshDeserialize, BorshSerialize}; // <-- Import borsh
 use serde::{Deserialize, Serialize};
 use solana_sdk::{
-    instruction::AccountMeta,
+    instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     signature::{Signature, Signer},
     signer::keypair::Keypair,
     system_instruction, system_program,
 };
 use spl_associated_token_account::get_associated_token_address;
-use spl_token::{id as spl_token_program_id, instruction};
+use spl_token::id as spl_token_program_id;
 use std::str::FromStr;
+
+// --- borsh-compatible Instruction Structs for Serialization ---
+// These structs define the exact data layout for SPL Token instructions.
+
+#[derive(BorshSerialize, BorshDeserialize)]
+struct MintToInstructionData {
+    instruction: u8, // MintTo instruction is `7`
+    amount: u64,
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
+struct TransferInstructionData {
+    instruction: u8, // Transfer instruction is `3`
+    amount: u64,
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
+struct InitializeMintInstructionData {
+    instruction: u8, // InitializeMint instruction is `0`
+    decimals: u8,
+    mint_authority: Pubkey,
+    freeze_authority_option: u8, // 0 for None
+                                 // Freeze authority pubkey would go here if option was 1
+}
 
 // --- Generic Response Wrappers ---
 
@@ -24,7 +49,6 @@ struct Response<T: Serialize> {
     error: Option<String>,
 }
 
-// Helper to create the standard error response with HTTP 200 status
 fn create_error_response(msg: &str) -> HttpResponse {
     HttpResponse::Ok().json(Response::<()> {
         success: false,
@@ -33,57 +57,43 @@ fn create_error_response(msg: &str) -> HttpResponse {
     })
 }
 
-// --- Endpoint-Specific Structs (Keypair) ---
+// --- Endpoint-Specific Structs ---
+
 #[derive(Serialize)]
 struct KeypairData {
     pubkey: String,
     secret: String,
 }
-
-// --- Endpoint-Specific Structs (Instructions) ---
-
-// Struct for endpoints requiring snake_case account fields (`/token/create`, `/token/mint`)
 #[derive(Serialize)]
 struct AccountMetaSnakeCase {
     pubkey: String,
     is_signer: bool,
     is_writable: bool,
 }
-
-// Struct for the generic instruction response using snake_case accounts
 #[derive(Serialize)]
 struct InstructionResponseSnakeCase {
     program_id: String,
     accounts: Vec<AccountMetaSnakeCase>,
     instruction_data: String,
 }
-
-// Struct for endpoints requiring camelCase account fields (`/send/token`)
 #[derive(Serialize)]
 struct AccountMetaCamelCase {
     pubkey: String,
     #[serde(rename = "isSigner")]
     is_signer: bool,
 }
-
-// Struct for the `/send/token` response
 #[derive(Serialize)]
 struct SendTokenResponse {
     program_id: String,
     accounts: Vec<AccountMetaCamelCase>,
     instruction_data: String,
 }
-
-// Struct for the `/send/sol` response (unique format)
 #[derive(Serialize)]
 struct SendSolResponse {
     program_id: String,
-    accounts: Vec<String>, // Spec requires a simple array of strings
+    accounts: Vec<String>,
     instruction_data: String,
 }
-
-// --- Endpoint-Specific Structs (Requests) ---
-
 #[derive(Deserialize)]
 struct TokenCreateRequest {
     #[serde(rename = "mintAuthority")]
@@ -91,7 +101,6 @@ struct TokenCreateRequest {
     mint: String,
     decimals: u8,
 }
-
 #[derive(Deserialize)]
 struct TokenMintRequest {
     mint: String,
@@ -99,41 +108,35 @@ struct TokenMintRequest {
     authority: String,
     amount: u64,
 }
-
 #[derive(Deserialize)]
 struct SignMessageRequest {
     message: String,
     secret: String,
 }
-
 #[derive(Serialize)]
 struct SignMessageResponse {
     signature: String,
     public_key: String,
     message: String,
 }
-
 #[derive(Deserialize)]
 struct VerifyMessageRequest {
     message: String,
     signature: String,
     pubkey: String,
 }
-
 #[derive(Serialize)]
 struct VerifyMessageResponse {
     valid: bool,
     message: String,
     pubkey: String,
 }
-
 #[derive(Deserialize)]
 struct SendSolRequest {
     from: String,
     to: String,
     lamports: u64,
 }
-
 #[derive(Deserialize)]
 struct SendTokenRequest {
     destination: String,
@@ -166,19 +169,25 @@ async fn create_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
         Err(_) => return create_error_response("Invalid mint public key"),
     };
 
-    let ix = match instruction::initialize_mint(
-        &spl_token_program_id(),
-        &mint,
-        &mint_authority,
-        None,
-        req.decimals,
-    ) {
-        Ok(ix) => ix,
-        Err(e) => return create_error_response(&format!("Failed to create instruction: {}", e)),
+    // Manually construct the instruction accounts as per SPL spec
+    let accounts_vec = vec![
+        AccountMeta::new(mint, false), // The mint account to initialize
+        AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false), // Rent sysvar
+    ];
+
+    // Manually serialize the instruction data using borsh
+    let instruction_data = InitializeMintInstructionData {
+        instruction: 0,
+        decimals: req.decimals,
+        mint_authority,
+        freeze_authority_option: 0,
+    };
+    let data_serialized = match instruction_data.try_to_vec() {
+        Ok(data) => data,
+        Err(e) => return create_error_response(&format!("Failed to serialize instruction: {}", e)),
     };
 
-    let accounts = ix
-        .accounts
+    let accounts_response = accounts_vec
         .into_iter()
         .map(|acc| AccountMetaSnakeCase {
             pubkey: acc.pubkey.to_string(),
@@ -190,9 +199,9 @@ async fn create_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
     HttpResponse::Ok().json(Response {
         success: true,
         data: Some(InstructionResponseSnakeCase {
-            program_id: ix.program_id.to_string(),
-            accounts,
-            instruction_data: general_purpose::STANDARD.encode(&ix.data),
+            program_id: spl_token_program_id().to_string(),
+            accounts: accounts_response,
+            instruction_data: general_purpose::STANDARD.encode(&data_serialized),
         }),
         error: None,
     })
@@ -203,8 +212,6 @@ async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
         Ok(pk) => pk,
         Err(_) => return create_error_response("Invalid mint public key"),
     };
-    // Per SPL spec, `destination` for `mint_to` is the token account, not the user's wallet.
-    // The test request will provide the correct address.
     let destination_token_account_pubkey = match Pubkey::from_str(&req.destination) {
         Ok(pk) => pk,
         Err(_) => return create_error_response("Invalid destination public key"),
@@ -214,20 +221,24 @@ async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
         Err(_) => return create_error_response("Invalid authority public key"),
     };
 
-    let ix = match instruction::mint_to(
-        &spl_token_program_id(),
-        &mint_pubkey,
-        &destination_token_account_pubkey,
-        &authority_pubkey,
-        &[],
-        req.amount,
-    ) {
-        Ok(ix) => ix,
-        Err(e) => return create_error_response(&format!("Failed to create instruction: {}", e)),
+    // Manually construct the instruction accounts
+    let accounts_vec = vec![
+        AccountMeta::new(mint_pubkey, false), // The mint
+        AccountMeta::new(destination_token_account_pubkey, false), // The token account to mint to
+        AccountMeta::new_readonly(authority_pubkey, true), // The mint authority
+    ];
+
+    // Manually serialize the instruction data using borsh
+    let instruction_data = MintToInstructionData {
+        instruction: 7, // Instruction for MintTo
+        amount: req.amount,
+    };
+    let data_serialized = match instruction_data.try_to_vec() {
+        Ok(data) => data,
+        Err(e) => return create_error_response(&format!("Failed to serialize instruction: {}", e)),
     };
 
-    let accounts = ix
-        .accounts
+    let accounts_response = accounts_vec
         .into_iter()
         .map(|acc| AccountMetaSnakeCase {
             pubkey: acc.pubkey.to_string(),
@@ -239,7 +250,90 @@ async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
     HttpResponse::Ok().json(Response {
         success: true,
         data: Some(InstructionResponseSnakeCase {
-            program_id: ix.program_id.to_string(),
+            program_id: spl_token_program_id().to_string(),
+            accounts: accounts_response,
+            instruction_data: general_purpose::STANDARD.encode(&data_serialized),
+        }),
+        error: None,
+    })
+}
+
+async fn send_token(req: web::Json<SendTokenRequest>) -> HttpResponse {
+    let owner_pubkey = match Pubkey::from_str(&req.owner) {
+        Ok(pk) => pk,
+        Err(_) => return create_error_response("Invalid owner public key"),
+    };
+    let mint_pubkey = match Pubkey::from_str(&req.mint) {
+        Ok(pk) => pk,
+        Err(_) => return create_error_response("Invalid mint public key"),
+    };
+    let destination_owner_pubkey = match Pubkey::from_str(&req.destination) {
+        Ok(pk) => pk,
+        Err(_) => return create_error_response("Invalid destination public key"),
+    };
+
+    let source_ata = get_associated_token_address(&owner_pubkey, &mint_pubkey);
+    let destination_ata = get_associated_token_address(&destination_owner_pubkey, &mint_pubkey);
+
+    // Manually construct the instruction accounts
+    let accounts_vec = vec![
+        AccountMeta::new(source_ata, false),      // Source token account
+        AccountMeta::new(destination_ata, false), // Destination token account
+        AccountMeta::new_readonly(owner_pubkey, true), // Owner of the source account
+    ];
+
+    // Manually serialize the instruction data using borsh
+    let instruction_data = TransferInstructionData {
+        instruction: 3, // Instruction for Transfer
+        amount: req.amount,
+    };
+    let data_serialized = match instruction_data.try_to_vec() {
+        Ok(data) => data,
+        Err(e) => return create_error_response(&format!("Failed to serialize instruction: {}", e)),
+    };
+
+    let accounts_response = accounts_vec
+        .into_iter()
+        .map(|acc| AccountMetaCamelCase {
+            pubkey: acc.pubkey.to_string(),
+            is_signer: acc.is_signer,
+        })
+        .collect();
+
+    HttpResponse::Ok().json(Response {
+        success: true,
+        data: Some(SendTokenResponse {
+            program_id: spl_token_program_id().to_string(),
+            accounts: accounts_response,
+            instruction_data: general_purpose::STANDARD.encode(&data_serialized),
+        }),
+        error: None,
+    })
+}
+
+async fn send_sol(req: web::Json<SendSolRequest>) -> HttpResponse {
+    let from_pubkey = match Pubkey::from_str(&req.from) {
+        Ok(pk) => pk,
+        Err(_) => return create_error_response("Invalid from public key"),
+    };
+    let to_pubkey = match Pubkey::from_str(&req.to) {
+        Ok(pk) => pk,
+        Err(_) => return create_error_response("Invalid to public key"),
+    };
+
+    // The solana_sdk::system_instruction::transfer helper is reliable and standard
+    let ix = system_instruction::transfer(&from_pubkey, &to_pubkey, req.lamports);
+
+    let accounts: Vec<String> = ix
+        .accounts
+        .iter()
+        .map(|acc| acc.pubkey.to_string())
+        .collect();
+
+    HttpResponse::Ok().json(Response {
+        success: true,
+        data: Some(SendSolResponse {
+            program_id: system_program::id().to_string(),
             accounts,
             instruction_data: general_purpose::STANDARD.encode(&ix.data),
         }),
@@ -294,86 +388,6 @@ async fn verify_message(req: web::Json<VerifyMessageRequest>) -> HttpResponse {
             valid,
             message: req.message.clone(),
             pubkey: req.pubkey.clone(),
-        }),
-        error: None,
-    })
-}
-
-async fn send_sol(req: web::Json<SendSolRequest>) -> HttpResponse {
-    let from_pubkey = match Pubkey::from_str(&req.from) {
-        Ok(pk) => pk,
-        Err(_) => return create_error_response("Invalid from public key"),
-    };
-    let to_pubkey = match Pubkey::from_str(&req.to) {
-        Ok(pk) => pk,
-        Err(_) => return create_error_response("Invalid to public key"),
-    };
-    let ix = system_instruction::transfer(&from_pubkey, &to_pubkey, req.lamports);
-
-    // Spec requires a simple array of strings for this endpoint's accounts.
-    let accounts: Vec<String> = ix
-        .accounts
-        .iter()
-        .map(|acc| acc.pubkey.to_string())
-        .collect();
-
-    HttpResponse::Ok().json(Response {
-        success: true,
-        data: Some(SendSolResponse {
-            program_id: system_program::id().to_string(), // Use the constant
-            accounts,
-            instruction_data: general_purpose::STANDARD.encode(&ix.data),
-        }),
-        error: None,
-    })
-}
-
-async fn send_token(req: web::Json<SendTokenRequest>) -> HttpResponse {
-    let owner_pubkey = match Pubkey::from_str(&req.owner) {
-        Ok(pk) => pk,
-        Err(_) => return create_error_response("Invalid owner public key"),
-    };
-    let mint_pubkey = match Pubkey::from_str(&req.mint) {
-        Ok(pk) => pk,
-        Err(_) => return create_error_response("Invalid mint public key"),
-    };
-    let destination_owner_pubkey = match Pubkey::from_str(&req.destination) {
-        Ok(pk) => pk,
-        Err(_) => return create_error_response("Invalid destination public key"),
-    };
-
-    // This is the "RPC-like" logic: derive the ATAs from the wallet addresses.
-    let source_ata = get_associated_token_address(&owner_pubkey, &mint_pubkey);
-    let destination_ata = get_associated_token_address(&destination_owner_pubkey, &mint_pubkey);
-
-    let ix = match instruction::transfer(
-        &spl_token_program_id(),
-        &source_ata,
-        &destination_ata,
-        &owner_pubkey,
-        &[],
-        req.amount,
-    ) {
-        Ok(ix) => ix,
-        Err(e) => return create_error_response(&format!("Failed to create instruction: {}", e)),
-    };
-
-    // This endpoint requires camelCase "isSigner"
-    let accounts = ix
-        .accounts
-        .into_iter()
-        .map(|acc: AccountMeta| AccountMetaCamelCase {
-            pubkey: acc.pubkey.to_string(),
-            is_signer: acc.is_signer,
-        })
-        .collect();
-
-    HttpResponse::Ok().json(Response {
-        success: true,
-        data: Some(SendTokenResponse {
-            program_id: ix.program_id.to_string(),
-            accounts,
-            instruction_data: general_purpose::STANDARD.encode(&ix.data),
         }),
         error: None,
     })
