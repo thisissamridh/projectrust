@@ -139,6 +139,7 @@ dependencies = [
  "base64 0.21.7",
  "chrono",
  "env_logger 0.10.2",
+ "log",
  "serde",
  "serde_json",
  "solana-sdk",
