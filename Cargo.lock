@@ -137,6 +137,7 @@ dependencies = [
  "actix-web 4.11.0",
  "base58",
  "base64 0.13.1",
+ "bincode",
  "ed25519-dalek",
  "rand 0.7.3",
  "serde",
