@@ -114,7 +114,7 @@ struct SendTokenRequest {
 #[derive(Serialize)]
 struct TokenAccount {
     pubkey: String,
-    #[serde(rename = "isSigner")]
+    #[serde(rename = "isSigner")] // Changed to match spec exactly
     is_signer: bool,
 }
 
@@ -177,7 +177,7 @@ async fn make_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
                 data: None,
                 error: Some("Invalid mint authority".to_string()),
             };
-            return HttpResponse::BadRequest().json(resp);
+            return HttpResponse::Ok().json(resp); // Changed to 200
         }
     };
 
@@ -189,7 +189,7 @@ async fn make_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
                 data: None,
                 error: Some("Invalid mint address".to_string()),
             };
-            return HttpResponse::BadRequest().json(resp);
+            return HttpResponse::Ok().json(resp); // Changed to 200
         }
     };
 
@@ -223,7 +223,8 @@ async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
     let mint_addr = match Pubkey::from_str(&req.mint) {
         Ok(pk) => pk,
         Err(_) => {
-            return HttpResponse::BadRequest().json(Response::<()> {
+            return HttpResponse::Ok().json(Response::<()> {
+                // Changed to 200
                 success: false,
                 data: None,
                 error: Some("Invalid mint address".to_string()),
@@ -234,7 +235,8 @@ async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
     let dest_addr = match Pubkey::from_str(&req.destination) {
         Ok(pk) => pk,
         Err(_) => {
-            return HttpResponse::BadRequest().json(Response::<()> {
+            return HttpResponse::Ok().json(Response::<()> {
+                // Changed to 200
                 success: false,
                 data: None,
                 error: Some("Invalid destination address".to_string()),
@@ -245,7 +247,8 @@ async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
     let auth_addr = match Pubkey::from_str(&req.authority) {
         Ok(pk) => pk,
         Err(_) => {
-            return HttpResponse::BadRequest().json(Response::<()> {
+            return HttpResponse::Ok().json(Response::<()> {
+                // Changed to 200
                 success: false,
                 data: None,
                 error: Some("Invalid authority address".to_string()),
@@ -289,7 +292,8 @@ async fn sign_message(req: web::Json<SignMessageRequest>) -> HttpResponse {
     let secret_bytes = match req.secret.from_base58() {
         Ok(bytes) => bytes,
         Err(_) => {
-            return HttpResponse::BadRequest().json(Response::<()> {
+            return HttpResponse::Ok().json(Response::<()> {
+                // Changed to 200
                 success: false,
                 data: None,
                 error: Some("Invalid secret key format".to_string()),
@@ -298,7 +302,8 @@ async fn sign_message(req: web::Json<SignMessageRequest>) -> HttpResponse {
     };
 
     if secret_bytes.len() != 64 {
-        return HttpResponse::BadRequest().json(Response::<()> {
+        return HttpResponse::Ok().json(Response::<()> {
+            // Changed to 200
             success: false,
             data: None,
             error: Some("Invalid secret key length".to_string()),
@@ -308,7 +313,8 @@ async fn sign_message(req: web::Json<SignMessageRequest>) -> HttpResponse {
     let keypair = match Keypair::from_bytes(&secret_bytes) {
         Ok(kp) => kp,
         Err(_) => {
-            return HttpResponse::BadRequest().json(Response::<()> {
+            return HttpResponse::Ok().json(Response::<()> {
+                // Changed to 200
                 success: false,
                 data: None,
                 error: Some("Invalid secret key".to_string()),
@@ -318,9 +324,13 @@ async fn sign_message(req: web::Json<SignMessageRequest>) -> HttpResponse {
 
     let signature = keypair.sign_message(req.message.as_bytes());
 
+    // Convert signature to base64 as per spec
+    let signature_bytes = signature.as_ref();
+    let signature_base64 = base64::encode(signature_bytes);
+
     let data = SignMessageResponse {
-        signature: signature.to_string(),
-        public_key: keypair.pubkey().to_string(),
+        signature: signature_base64,              // Now properly base64 encoded
+        public_key: keypair.pubkey().to_string(), // This is already base58
         message: req.message.clone(),
     };
 
@@ -335,7 +345,8 @@ async fn verify_message(req: web::Json<VerifyMessageRequest>) -> HttpResponse {
     let public_key = match Pubkey::from_str(&req.pubkey) {
         Ok(pk) => pk,
         Err(_) => {
-            return HttpResponse::BadRequest().json(Response::<()> {
+            return HttpResponse::Ok().json(Response::<()> {
+                // Changed to 200
                 success: false,
                 data: None,
                 error: Some("Invalid public key".to_string()),
@@ -343,13 +354,36 @@ async fn verify_message(req: web::Json<VerifyMessageRequest>) -> HttpResponse {
         }
     };
 
-    let signature = match req.signature.parse::<Signature>() {
-        Ok(sig) => sig,
+    // Decode base64 signature as per spec
+    let signature_bytes = match base64::decode(&req.signature) {
+        Ok(bytes) => bytes,
         Err(_) => {
-            return HttpResponse::BadRequest().json(Response::<()> {
+            return HttpResponse::Ok().json(Response::<()> {
+                // Changed to 200
                 success: false,
                 data: None,
                 error: Some("Invalid signature format".to_string()),
+            });
+        }
+    };
+
+    if signature_bytes.len() != 64 {
+        return HttpResponse::Ok().json(Response::<()> {
+            // Changed to 200
+            success: false,
+            data: None,
+            error: Some("Invalid signature length".to_string()),
+        });
+    }
+
+    let signature = match Signature::try_from(signature_bytes.as_slice()) {
+        Ok(sig) => sig,
+        Err(_) => {
+            return HttpResponse::Ok().json(Response::<()> {
+                // Changed to 200
+                success: false,
+                data: None,
+                error: Some("Invalid signature".to_string()),
             });
         }
     };
@@ -373,7 +407,8 @@ async fn send_sol(req: web::Json<SendSolRequest>) -> HttpResponse {
     let from_addr = match Pubkey::from_str(&req.from) {
         Ok(pk) => pk,
         Err(_) => {
-            return HttpResponse::BadRequest().json(Response::<()> {
+            return HttpResponse::Ok().json(Response::<()> {
+                // Changed to 200
                 success: false,
                 data: None,
                 error: Some("Invalid from address".to_string()),
@@ -384,7 +419,8 @@ async fn send_sol(req: web::Json<SendSolRequest>) -> HttpResponse {
     let to_addr = match Pubkey::from_str(&req.to) {
         Ok(pk) => pk,
         Err(_) => {
-            return HttpResponse::BadRequest().json(Response::<()> {
+            return HttpResponse::Ok().json(Response::<()> {
+                // Changed to 200
                 success: false,
                 data: None,
                 error: Some("Invalid to address".to_string()),
@@ -393,7 +429,8 @@ async fn send_sol(req: web::Json<SendSolRequest>) -> HttpResponse {
     };
 
     if req.lamports == 0 {
-        return HttpResponse::BadRequest().json(Response::<()> {
+        return HttpResponse::Ok().json(Response::<()> {
+            // Changed to 200
             success: false,
             data: None,
             error: Some("Amount must be greater than 0".to_string()),
@@ -402,6 +439,7 @@ async fn send_sol(req: web::Json<SendSolRequest>) -> HttpResponse {
 
     let ix = system_instruction::transfer(&from_addr, &to_addr, req.lamports);
 
+    // Spec wants accounts as array of strings, not objects
     let accounts: Vec<String> = ix
         .accounts
         .iter()
@@ -425,7 +463,8 @@ async fn send_token(req: web::Json<SendTokenRequest>) -> HttpResponse {
     let dest_addr = match Pubkey::from_str(&req.destination) {
         Ok(pk) => pk,
         Err(_) => {
-            return HttpResponse::BadRequest().json(Response::<()> {
+            return HttpResponse::Ok().json(Response::<()> {
+                // Changed to 200
                 success: false,
                 data: None,
                 error: Some("Invalid destination address".to_string()),
@@ -436,7 +475,8 @@ async fn send_token(req: web::Json<SendTokenRequest>) -> HttpResponse {
     let mint_addr = match Pubkey::from_str(&req.mint) {
         Ok(pk) => pk,
         Err(_) => {
-            return HttpResponse::BadRequest().json(Response::<()> {
+            return HttpResponse::Ok().json(Response::<()> {
+                // Changed to 200
                 success: false,
                 data: None,
                 error: Some("Invalid mint address".to_string()),
@@ -447,7 +487,8 @@ async fn send_token(req: web::Json<SendTokenRequest>) -> HttpResponse {
     let owner_addr = match Pubkey::from_str(&req.owner) {
         Ok(pk) => pk,
         Err(_) => {
-            return HttpResponse::BadRequest().json(Response::<()> {
+            return HttpResponse::Ok().json(Response::<()> {
+                // Changed to 200
                 success: false,
                 data: None,
                 error: Some("Invalid owner address".to_string()),
@@ -456,7 +497,8 @@ async fn send_token(req: web::Json<SendTokenRequest>) -> HttpResponse {
     };
 
     if req.amount == 0 {
-        return HttpResponse::BadRequest().json(Response::<()> {
+        return HttpResponse::Ok().json(Response::<()> {
+            // Changed to 200
             success: false,
             data: None,
             error: Some("Amount must be greater than 0".to_string()),
