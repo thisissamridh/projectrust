@@ -172,8 +172,8 @@ async fn make_keypair() -> HttpResponse {
 async fn make_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
     // Check for missing/empty fields
     if req.mint_authority.is_empty() || req.mint.is_empty() {
-        return HttpResponse::Ok().json(Response::<()> {
-            // Changed back to 200!
+        return HttpResponse::BadRequest().json(Response::<()> {
+            // BACK TO 400!
             success: false,
             data: None,
             error: Some("Missing required fields".to_string()),
@@ -182,8 +182,8 @@ async fn make_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
 
     // Validate decimals (SPL Token standard allows 0-9 decimals)
     if req.decimals > 9 {
-        return HttpResponse::Ok().json(Response::<()> {
-            // Changed back to 200!
+        return HttpResponse::BadRequest().json(Response::<()> {
+            // BACK TO 400!
             success: false,
             data: None,
             error: Some("Decimals must be between 0 and 9".to_string()),
@@ -193,8 +193,8 @@ async fn make_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
     let mint_auth = match Pubkey::from_str(&req.mint_authority) {
         Ok(pk) => pk,
         Err(_) => {
-            return HttpResponse::Ok().json(Response::<()> {
-                // Changed back to 200!
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
                 success: false,
                 data: None,
                 error: Some("Invalid mint authority".to_string()),
@@ -205,8 +205,8 @@ async fn make_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
     let mint_addr = match Pubkey::from_str(&req.mint) {
         Ok(pk) => pk,
         Err(_) => {
-            return HttpResponse::Ok().json(Response::<()> {
-                // Changed back to 200!
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
                 success: false,
                 data: None,
                 error: Some("Invalid mint address".to_string()),
@@ -224,8 +224,8 @@ async fn make_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
     ) {
         Ok(instruction) => instruction,
         Err(_) => {
-            return HttpResponse::Ok().json(Response::<()> {
-                // Changed back to 200!
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
                 success: false,
                 data: None,
                 error: Some("Failed to create instruction".to_string()),
@@ -251,7 +251,7 @@ async fn make_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
     };
 
     HttpResponse::Ok().json(Response {
-        // Success is still 200
+        // SUCCESS = 200
         success: true,
         data: Some(data),
         error: None,
@@ -261,8 +261,8 @@ async fn make_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
 async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
     // Check for empty fields
     if req.mint.is_empty() || req.destination.is_empty() || req.authority.is_empty() {
-        return HttpResponse::Ok().json(Response::<()> {
-            // Changed back to 200!
+        return HttpResponse::BadRequest().json(Response::<()> {
+            // BACK TO 400!
             success: false,
             data: None,
             error: Some("Missing required fields".to_string()),
@@ -271,8 +271,8 @@ async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
 
     // Validate amount
     if req.amount == 0 {
-        return HttpResponse::Ok().json(Response::<()> {
-            // Changed back to 200!
+        return HttpResponse::BadRequest().json(Response::<()> {
+            // BACK TO 400!
             success: false,
             data: None,
             error: Some("Amount must be greater than 0".to_string()),
@@ -282,8 +282,8 @@ async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
     let mint_addr = match Pubkey::from_str(&req.mint) {
         Ok(pk) => pk,
         Err(_) => {
-            return HttpResponse::Ok().json(Response::<()> {
-                // Changed back to 200!
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
                 success: false,
                 data: None,
                 error: Some("Invalid mint address".to_string()),
@@ -294,8 +294,8 @@ async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
     let dest_addr = match Pubkey::from_str(&req.destination) {
         Ok(pk) => pk,
         Err(_) => {
-            return HttpResponse::Ok().json(Response::<()> {
-                // Changed back to 200!
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
                 success: false,
                 data: None,
                 error: Some("Invalid destination address".to_string()),
@@ -306,8 +306,8 @@ async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
     let auth_addr = match Pubkey::from_str(&req.authority) {
         Ok(pk) => pk,
         Err(_) => {
-            return HttpResponse::Ok().json(Response::<()> {
-                // Changed back to 200!
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
                 success: false,
                 data: None,
                 error: Some("Invalid authority address".to_string()),
@@ -316,8 +316,6 @@ async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
     };
 
     // Create valid mint_to instruction
-    // This assumes the destination is a token account address, not a wallet address
-    // For a complete RPC-ready instruction, the destination should be the token account
     let ix = match instruction::mint_to(
         &spl_token::id(),
         &mint_addr, // mint account
@@ -328,8 +326,8 @@ async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
     ) {
         Ok(instruction) => instruction,
         Err(_) => {
-            return HttpResponse::Ok().json(Response::<()> {
-                // Changed back to 200!
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
                 success: false,
                 data: None,
                 error: Some("Failed to create instruction".to_string()),
@@ -355,6 +353,320 @@ async fn mint_token(req: web::Json<TokenMintRequest>) -> HttpResponse {
     };
 
     HttpResponse::Ok().json(Response {
+        // SUCCESS = 200
+        success: true,
+        data: Some(data),
+        error: None,
+    })
+}
+
+async fn sign_message(req: web::Json<SignMessageRequest>) -> HttpResponse {
+    // Check for missing fields first
+    if req.message.is_empty() {
+        return HttpResponse::BadRequest().json(Response::<()> {
+            // BACK TO 400!
+            success: false,
+            data: None,
+            error: Some("Missing required fields".to_string()),
+        });
+    }
+
+    if req.secret.is_empty() {
+        return HttpResponse::BadRequest().json(Response::<()> {
+            // BACK TO 400!
+            success: false,
+            data: None,
+            error: Some("Missing required fields".to_string()),
+        });
+    }
+
+    let secret_bytes = match req.secret.from_base58() {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
+                success: false,
+                data: None,
+                error: Some("Invalid secret key format".to_string()),
+            });
+        }
+    };
+
+    if secret_bytes.len() != 64 {
+        return HttpResponse::BadRequest().json(Response::<()> {
+            // BACK TO 400!
+            success: false,
+            data: None,
+            error: Some("Invalid secret key length".to_string()),
+        });
+    }
+
+    let keypair = match Keypair::from_bytes(&secret_bytes) {
+        Ok(kp) => kp,
+        Err(_) => {
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
+                success: false,
+                data: None,
+                error: Some("Invalid secret key".to_string()),
+            });
+        }
+    };
+
+    let signature = keypair.sign_message(req.message.as_bytes());
+    let signature_bytes = signature.as_ref();
+    let signature_base64 = base64::encode(signature_bytes);
+
+    let data = SignMessageResponse {
+        signature: signature_base64,
+        public_key: keypair.pubkey().to_string(),
+        message: req.message.clone(),
+    };
+
+    HttpResponse::Ok().json(Response {
+        // SUCCESS = 200
+        success: true,
+        data: Some(data),
+        error: None,
+    })
+}
+
+async fn verify_message(req: web::Json<VerifyMessageRequest>) -> HttpResponse {
+    // Check for missing fields
+    if req.message.is_empty() || req.signature.is_empty() || req.pubkey.is_empty() {
+        return HttpResponse::BadRequest().json(Response::<()> {
+            // BACK TO 400!
+            success: false,
+            data: None,
+            error: Some("Missing required fields".to_string()),
+        });
+    }
+
+    let public_key = match Pubkey::from_str(&req.pubkey) {
+        Ok(pk) => pk,
+        Err(_) => {
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
+                success: false,
+                data: None,
+                error: Some("Invalid public key".to_string()),
+            });
+        }
+    };
+
+    let signature_bytes = match base64::decode(&req.signature) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
+                success: false,
+                data: None,
+                error: Some("Invalid signature format".to_string()),
+            });
+        }
+    };
+
+    if signature_bytes.len() != 64 {
+        return HttpResponse::BadRequest().json(Response::<()> {
+            // BACK TO 400!
+            success: false,
+            data: None,
+            error: Some("Invalid signature length".to_string()),
+        });
+    }
+
+    let signature = match Signature::try_from(signature_bytes.as_slice()) {
+        Ok(sig) => sig,
+        Err(_) => {
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
+                success: false,
+                data: None,
+                error: Some("Invalid signature".to_string()),
+            });
+        }
+    };
+
+    let valid = signature.verify(public_key.as_ref(), req.message.as_bytes());
+
+    let data = VerifyMessageResponse {
+        valid,
+        message: req.message.clone(),
+        pubkey: req.pubkey.clone(),
+    };
+
+    HttpResponse::Ok().json(Response {
+        // SUCCESS = 200
+        success: true,
+        data: Some(data),
+        error: None,
+    })
+}
+
+async fn send_sol(req: web::Json<SendSolRequest>) -> HttpResponse {
+    // Check for empty strings
+    if req.from.is_empty() || req.to.is_empty() {
+        return HttpResponse::BadRequest().json(Response::<()> {
+            // BACK TO 400!
+            success: false,
+            data: None,
+            error: Some("Missing required fields".to_string()),
+        });
+    }
+
+    let from_addr = match Pubkey::from_str(&req.from) {
+        Ok(pk) => pk,
+        Err(_) => {
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
+                success: false,
+                data: None,
+                error: Some("Invalid from address".to_string()),
+            });
+        }
+    };
+
+    let to_addr = match Pubkey::from_str(&req.to) {
+        Ok(pk) => pk,
+        Err(_) => {
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
+                success: false,
+                data: None,
+                error: Some("Invalid to address".to_string()),
+            });
+        }
+    };
+
+    if req.lamports == 0 {
+        return HttpResponse::BadRequest().json(Response::<()> {
+            // BACK TO 400!
+            success: false,
+            data: None,
+            error: Some("Amount must be greater than 0".to_string()),
+        });
+    }
+
+    let ix = system_instruction::transfer(&from_addr, &to_addr, req.lamports);
+
+    // Spec wants accounts as array of strings for Send SOL
+    let accounts: Vec<String> = ix
+        .accounts
+        .iter()
+        .map(|acc| acc.pubkey.to_string())
+        .collect();
+
+    let data = SendSolResponse {
+        program_id: ix.program_id.to_string(),
+        accounts,
+        instruction_data: base64::encode(&ix.data),
+    };
+
+    HttpResponse::Ok().json(Response {
+        // SUCCESS = 200
+        success: true,
+        data: Some(data),
+        error: None,
+    })
+}
+
+async fn send_token(req: web::Json<SendTokenRequest>) -> HttpResponse {
+    // Check for missing/empty fields
+    if req.destination.is_empty() || req.mint.is_empty() || req.owner.is_empty() {
+        return HttpResponse::BadRequest().json(Response::<()> {
+            // BACK TO 400!
+            success: false,
+            data: None,
+            error: Some("Missing required fields".to_string()),
+        });
+    }
+
+    if req.amount == 0 {
+        return HttpResponse::BadRequest().json(Response::<()> {
+            // BACK TO 400!
+            success: false,
+            data: None,
+            error: Some("Amount must be greater than 0".to_string()),
+        });
+    }
+
+    let dest_addr = match Pubkey::from_str(&req.destination) {
+        Ok(pk) => pk,
+        Err(_) => {
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
+                success: false,
+                data: None,
+                error: Some("Invalid destination address".to_string()),
+            });
+        }
+    };
+
+    let mint_addr = match Pubkey::from_str(&req.mint) {
+        Ok(pk) => pk,
+        Err(_) => {
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
+                success: false,
+                data: None,
+                error: Some("Invalid mint address".to_string()),
+            });
+        }
+    };
+
+    let owner_addr = match Pubkey::from_str(&req.owner) {
+        Ok(pk) => pk,
+        Err(_) => {
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
+                success: false,
+                data: None,
+                error: Some("Invalid owner address".to_string()),
+            });
+        }
+    };
+
+    // Calculate Associated Token Addresses for proper token transfer
+    let source_ata = get_associated_token_address(&owner_addr, &mint_addr);
+    let dest_ata = get_associated_token_address(&dest_addr, &mint_addr);
+
+    let ix = match instruction::transfer(
+        &spl_token::id(),
+        &source_ata, // source token account (ATA of owner)
+        &dest_ata,   // destination token account (ATA of destination)
+        &owner_addr, // owner of source account (signer)
+        &[],         // no multisig signers
+        req.amount,
+    ) {
+        Ok(instruction) => instruction,
+        Err(_) => {
+            return HttpResponse::BadRequest().json(Response::<()> {
+                // BACK TO 400!
+                success: false,
+                data: None,
+                error: Some("Failed to create instruction".to_string()),
+            });
+        }
+    };
+
+    // For send token - spec shows objects with pubkey and isSigner only
+    let accounts: Vec<TokenAccount> = ix
+        .accounts
+        .iter()
+        .map(|acc| TokenAccount {
+            pubkey: acc.pubkey.to_string(),
+            is_signer: acc.is_signer,
+        })
+        .collect();
+
+    let data = SendTokenResponse {
+        program_id: ix.program_id.to_string(),
+        accounts,
+        instruction_data: base64::encode(&ix.data),
+    };
+
+    HttpResponse::Ok().json(Response {
+        // SUCCESS = 200
         success: true,
         data: Some(data),
         error: None,
