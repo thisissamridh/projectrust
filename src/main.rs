@@ -44,6 +44,34 @@ struct TokenCreateResponse {
     instruction_data: String,
 }
 
+// #[derive(Deserialize)]
+// struct TokenMintRequest {
+//     mint: String,
+//     destination: String,
+//     authority: String,
+//     amount: u64,
+// }
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    println!("Starting server on port 8080");
+
+    HttpServer::new(|| {
+        App::new()
+            .route("/health", web::get().to(health))
+            .route("/keypair", web::post().to(make_keypair))
+            .route("/token/create", web::post().to(make_token))
+    })
+    .bind("0.0.0.0:8080")?
+    .run()
+    .await
+}
+
+async fn health() -> HttpResponse {
+    HttpResponse::Ok().json(serde_json::json!({
+        "status": "ok"
+    }))
+}
+
 async fn make_keypair() -> HttpResponse {
     let kp = Keypair::new();
 
@@ -114,25 +142,4 @@ async fn make_token(req: web::Json<TokenCreateRequest>) -> HttpResponse {
     };
 
     HttpResponse::Ok().json(resp)
-}
-
-async fn health() -> HttpResponse {
-    HttpResponse::Ok().json(serde_json::json!({
-        "status": "ok"
-    }))
-}
-
-#[actix_web::main]
-async fn main() -> std::io::Result<()> {
-    println!("Starting server on port 8080");
-
-    HttpServer::new(|| {
-        App::new()
-            .route("/health", web::get().to(health))
-            .route("/keypair", web::post().to(make_keypair))
-            .route("/token/create", web::post().to(make_token))
-    })
-    .bind("127.0.0.1:8080")?
-    .run()
-    .await
 }
